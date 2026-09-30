@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-interviewai}
+      POSTGRES_USER: ${POSTGRES_USER:-interviewai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-interviewai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-interviewai} -d ${POSTGRES_DB:-interviewai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ai-service:
+    build:
+      context: ./ai-service
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-interviewai}:${POSTGRES_PASSWORD:-interviewai}@postgres:5432/${POSTGRES_DB:-interviewai}
+      SPRING_BACKEND_URL: http://backend:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-interviewai}
+      DATABASE_USERNAME: ${POSTGRES_USER:-interviewai}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-interviewai}
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_JWKS_URI: ${CLERK_JWKS_URI:-}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      AI_SERVICE_URL: http://ai-service:8000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    env_file:
+      - path: ./frontend/.env.local
+        required: false
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
