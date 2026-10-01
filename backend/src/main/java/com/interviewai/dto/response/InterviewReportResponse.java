@@ -17,7 +17,9 @@ public record InterviewReportResponse(
         List<String> strengths,
         List<String> weaknesses,
         List<RecommendedTopic> recommendedTopics,
-        boolean evaluationPending) {
+        boolean evaluationPending,
+        int evaluatedQuestions,
+        int totalAnswers) {
     public record RecommendedTopic(String title, String difficulty, String action) {
     }
 }

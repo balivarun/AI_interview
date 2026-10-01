@@ -40,6 +40,7 @@ services:
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       CLERK_JWKS_URI: ${CLERK_JWKS_URI:-}
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CODE_EXECUTION_URL: ${CODE_EXECUTION_URL:-https://wandbox.org/api/compile.json}
       AI_SERVICE_URL: http://ai-service:8000
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     ports:

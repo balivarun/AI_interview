@@ -79,6 +79,18 @@ export interface InterviewReport {
     action: string;
   }>;
   evaluationPending?: boolean;
+  evaluatedQuestions: number;
+  totalAnswers: number;
+}
+
+export interface CodeExecutionResult {
+  ok: boolean;
+  succeeded: boolean;
+  status: string;
+  output: string;
+  errorOutput: string;
+  compileOutput: string;
+  compileError: string;
 }
 
 export interface PerformancePoint {

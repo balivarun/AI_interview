@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface EvaluationRepository extends JpaRepository<Evaluation, UUID> {
+    boolean existsByAnswerId(UUID answerId);
     @Query("select e from Evaluation e where e.answer.interview.id = :interviewId")
     List<Evaluation> findAllForInterview(@Param("interviewId") UUID interviewId);
 }

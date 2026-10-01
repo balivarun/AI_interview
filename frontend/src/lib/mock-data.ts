@@ -122,6 +122,8 @@ export const mockReport: InterviewReport = {
   duration: "30 min",
   completedAt: "September 30, 2026",
   score: 7.8,
+  evaluatedQuestions: 10,
+  totalAnswers: 10,
   technicalKnowledge: 8.0,
   problemSolving: 8.2,
   communication: 7.4,

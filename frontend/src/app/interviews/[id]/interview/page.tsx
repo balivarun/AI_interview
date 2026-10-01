@@ -14,7 +14,8 @@ import { ErrorState } from "@/components/ui/error-state";
 import { InterviewSkeleton } from "@/components/ui/skeleton";
 import { startInterview, submitAnswer, submitCode } from "@/lib/api";
 import { QuestionCard } from "@/components/interview/question-card";
-import { CodeEditor, LanguageSelector } from "@/components/coding/code-editor";
+import { CodeEditor, CodeOutput, LanguageSelector } from "@/components/coding/code-editor";
+import type { CodeExecutionResult } from "@/lib/types";
 
 export default function InterviewScreenPage() {
   const params = useParams();
@@ -28,14 +29,10 @@ export default function InterviewScreenPage() {
 
   const [answer, setAnswer] = useState("");
   const [language, setLanguage] = useState<"Java" | "Python" | "C++">("Java");
-  const [code, setCode] = useState(`public class Solution {
-    public int[] twoSum(int[] nums, int target) {
-        // Write your solution here
-        return new int[]{};
-    }
-}`);
+  const [code, setCode] = useState(starterCode("Java"));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionMessage, setSubmissionMessage] = useState("");
+  const [executionResult, setExecutionResult] = useState<CodeExecutionResult | null>(null);
 
   const currentQuestionIndex = Math.max(0, (data?.currentQuestion ?? 1) - 1);
   const currentQuestion = data?.questions[currentQuestionIndex];
@@ -50,7 +47,8 @@ export default function InterviewScreenPage() {
     setSubmissionMessage("");
     try {
       if (isCodingInterview) {
-        await submitCode({ interviewId: data.id, questionId: currentQuestion.id, language, code });
+        const result = await submitCode({ interviewId: data.id, questionId: currentQuestion.id, language, code });
+        setExecutionResult(result);
       }
       const result = await submitAnswer({
         interviewId: data.id,
@@ -77,9 +75,7 @@ export default function InterviewScreenPage() {
     setSubmissionMessage("");
     try {
       const result = await submitCode({ interviewId: data.id, questionId: currentQuestion.id, language, code });
-      setSubmissionMessage(result.status === "NOT_CONFIGURED"
-        ? "Code saved. Sandboxed execution is not configured yet."
-        : `${result.passed}/${result.total} tests passed.`);
+      setExecutionResult(result);
     } catch (error) {
       setSubmissionMessage(error instanceof Error ? error.message : "Unable to submit code.");
     } finally {
@@ -115,7 +111,10 @@ export default function InterviewScreenPage() {
                   <LanguageSelector
                     value={language}
                     onChange={(value) => {
-                      if (value === "Java" || value === "Python" || value === "C++") setLanguage(value);
+                      if (value === "Java" || value === "Python" || value === "C++") {
+                        setLanguage(value);
+                        setCode(starterCode(value));
+                      }
                     }}
                   />
                 </div>
@@ -127,6 +126,7 @@ export default function InterviewScreenPage() {
                   </Button>
                 </div>
                 {submissionMessage && <p role="status" className="text-sm text-slate-300">{submissionMessage}</p>}
+                <CodeOutput result={executionResult} />
               </CardContent>
             </Card>
           </div>
@@ -182,4 +182,12 @@ export default function InterviewScreenPage() {
       </div>
     </AppShell>
   );
+}
+
+function starterCode(language: "Java" | "Python" | "C++"): string {
+  if (language === "Python") return 'print("Ready to run")\n';
+  if (language === "C++") {
+    return '#include <iostream>\n\nint main() {\n    std::cout << "Ready to run\\n";\n    return 0;\n}\n';
+  }
+  return 'class prog {\n    public static void main(String[] args) {\n        System.out.println("Ready to run");\n    }\n}\n';
 }

@@ -25,6 +25,7 @@ app:
   clerk-issuer: ${CLERK_ISSUER:}
   clerk-jwks-uri: ${CLERK_JWKS_URI:}
   clerk-publishable-key: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:}
+  code-execution-url: ${CODE_EXECUTION_URL:https://wandbox.org/api/compile.json}
 
 management:
   endpoints:

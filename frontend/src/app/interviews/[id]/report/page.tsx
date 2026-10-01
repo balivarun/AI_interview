@@ -2,17 +2,20 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { PageSkeleton } from "@/components/ui/skeleton";
 import { RadialScore } from "@/components/ui/radial-score";
-import { getReport } from "@/lib/api";
+import { getReport, retryPendingEvaluations } from "@/lib/api";
 
 export default function InterviewReportPage() {
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? "";
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryError, setRetryError] = useState("");
   const { data: report, isLoading, isError, refetch } = useQuery({
     queryKey: ["interview-report", id],
     queryFn: () => getReport(id),
@@ -29,6 +32,20 @@ export default function InterviewReportPage() {
     { label: "Code Quality", value: report.codeQuality },
     { label: "Complexity Analysis", value: report.complexityAnalysis },
   ];
+  const hasEvaluation = report.evaluatedQuestions > 0;
+
+  const retryEvaluations = async () => {
+    setIsRetrying(true);
+    setRetryError("");
+    try {
+      await retryPendingEvaluations(id);
+      await refetch();
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : "Evaluation retry failed.");
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   return (
     <AppShell>
@@ -42,18 +59,33 @@ export default function InterviewReportPage() {
           <div className="rounded-2xl border border-slate-700 bg-slate-900/70 px-6 py-4">
             <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Overall Score</div>
             <div className="mt-1 text-3xl font-semibold text-slate-50">
-              {report.evaluationPending ? "Pending" : `${report.score.toFixed(1)} / 10`}
+              {hasEvaluation ? `${report.score.toFixed(1)} / 10` : "Pending"}
             </div>
+            {hasEvaluation && report.evaluationPending && (
+              <div className="mt-1 text-xs text-amber-300">
+                {report.evaluatedQuestions}/{report.totalAnswers} evaluated
+              </div>
+            )}
           </div>
         </div>
 
-        {report.evaluationPending ? (
+        {report.evaluationPending && (
           <Card className="p-0">
-            <CardContent className="p-5 text-sm text-slate-300">
-              Your answers are saved. Scores and feedback will appear when AI evaluation is available.
+            <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <p className="text-sm text-slate-300">
+                {hasEvaluation
+                  ? `Evaluation is pending for ${report.totalAnswers - report.evaluatedQuestions} answer(s). Existing scores are shown below.`
+                  : "Your answers are saved. AI evaluation is pending."}
+              </p>
+              <Button onClick={retryEvaluations} disabled={isRetrying}>
+                {isRetrying ? "Retrying..." : "Retry evaluation"}
+              </Button>
+              {retryError && <p role="alert" className="w-full text-sm text-red-400">{retryError}</p>}
             </CardContent>
           </Card>
-        ) : (
+        )}
+
+        {hasEvaluation && (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {scoreCards.map((card) => (
               <Card key={card.label} className="p-0">

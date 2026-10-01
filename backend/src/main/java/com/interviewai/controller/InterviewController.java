@@ -81,4 +81,10 @@ public class InterviewController {
     public InterviewReportResponse report(@AuthenticationPrincipal Jwt principal, @PathVariable UUID id) {
         return interviewService.report(principal.getSubject(), id);
     }
+
+    @PostMapping("/{id}/evaluations/retry")
+    public InterviewReportResponse retryEvaluations(
+            @AuthenticationPrincipal Jwt principal, @PathVariable UUID id) {
+        return interviewService.retryPendingEvaluations(principal.getSubject(), id);
+    }
 }

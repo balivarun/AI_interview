@@ -2,6 +2,7 @@ import type {
   AnalyticsData,
   AnswerPayload,
   CodeSubmission,
+  CodeExecutionResult,
   DashboardData,
   Interview,
   InterviewConfig,
@@ -230,7 +231,7 @@ export async function submitAnswer(
   });
 }
 
-export async function submitCode(data: CodeSubmission): Promise<{ ok: true; passed: number; total: number; status: string }> {
+export async function submitCode(data: CodeSubmission): Promise<CodeExecutionResult> {
   return request(`/interviews/${data.interviewId}/code-submit`, {
     method: "POST",
     body: JSON.stringify({ questionId: data.questionId, language: data.language, code: data.code }),
@@ -239,6 +240,20 @@ export async function submitCode(data: CodeSubmission): Promise<{ ok: true; pass
 
 export async function getReport(id: string): Promise<InterviewReport> {
   const report = await request<InterviewReport & { role: string }>(`/interviews/${id}/report`);
+  return {
+    ...report,
+    role: fromRole(report.role),
+    recommendedTopics: report.recommendedTopics.map((topic) => ({
+      ...topic,
+      difficulty: fromDifficulty(topic.difficulty),
+    })),
+  };
+}
+
+export async function retryPendingEvaluations(id: string): Promise<InterviewReport> {
+  const report = await request<InterviewReport & { role: string }>(`/interviews/${id}/evaluations/retry`, {
+    method: "POST",
+  });
   return {
     ...report,
     role: fromRole(report.role),

@@ -1,8 +1,9 @@
 "use client";
 
 import Editor from "@monaco-editor/react";
-import { Check, X } from "lucide-react";
+import { Check, CircleAlert } from "lucide-react";
 import { useState } from "react";
+import type { CodeExecutionResult } from "@/lib/types";
 
 export function LanguageSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const languages = ["Java", "Python", "C++"];
@@ -27,13 +28,14 @@ export function LanguageSelector({ value, onChange }: { value: string; onChange:
 
 export function CodeEditor({ language, code, onChange }: { language: string; code: string; onChange: (value: string) => void }) {
   const [mounted, setMounted] = useState(false);
+  const editorLanguage = language === "C++" ? "cpp" : language.toLowerCase();
 
   return (
     <div className="h-[280px] rounded-xl border border-slate-700 bg-[#0f172a]">
       <Editor
         height="100%"
-        defaultLanguage={language.toLowerCase()}
-        language={language.toLowerCase()}
+        defaultLanguage={editorLanguage}
+        language={editorLanguage}
         value={code}
         onMount={() => setMounted(true)}
         onChange={(value) => onChange(value ?? "")}
@@ -52,24 +54,37 @@ export function CodeEditor({ language, code, onChange }: { language: string; cod
   );
 }
 
-export function TestResults({ results }: { results: { passed: boolean; label: string }[] }) {
-  const passedCount = results.filter((item) => item.passed).length;
-
+export function CodeOutput({ result }: { result: CodeExecutionResult | null }) {
   return (
     <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-900/80 p-4">
-      <div className="text-sm font-semibold text-slate-100">Test Results</div>
-      <div className="space-y-2">
-        {results.map((item) => (
-          <div key={item.label} className="flex items-center gap-2 text-sm text-slate-200">
-            {item.passed ? <Check className="h-4 w-4 text-emerald-400" /> : <X className="h-4 w-4 text-red-400" />}
-            <span>{item.label}</span>
-          </div>
-        ))}
+      <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+        {result?.succeeded
+          ? <Check className="h-4 w-4 text-emerald-400" />
+          : <CircleAlert className="h-4 w-4 text-amber-400" />}
+        {result ? result.status.replaceAll("_", " ") : "Execution output"}
       </div>
-      <div className="border-t border-slate-700 pt-3 text-sm text-slate-300">
-        {passedCount} / {results.length} passed
-      </div>
-      <div className="text-sm text-slate-300">Runtime: 42 ms</div>
+      <p className="text-xs text-slate-400">
+        {"Java: use class prog with a main method. Python and C++ need a runnable entry point."}
+      </p>
+      {!result && <p className="text-sm text-slate-400">Run your code to see its output.</p>}
+      {result?.compileOutput && <OutputBlock label="Compiler output" value={result.compileOutput} />}
+      {result?.compileError && <OutputBlock label="Compiler errors" value={result.compileError} error />}
+      {result?.output && <OutputBlock label="Program output" value={result.output} />}
+      {result?.errorOutput && <OutputBlock label="Runtime errors" value={result.errorOutput} error />}
+      {result && !result.output && !result.errorOutput && !result.compileOutput && !result.compileError && (
+        <p className="text-sm text-slate-400">Program completed without output.</p>
+      )}
+    </div>
+  );
+}
+
+function OutputBlock({ label, value, error = false }: { label: string; value: string; error?: boolean }) {
+  return (
+    <div className="space-y-2">
+      <div className={`text-xs font-medium ${error ? "text-red-300" : "text-slate-400"}`}>{label}</div>
+      <pre className={`max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-sm ${error ? "text-red-200" : "text-slate-200"}`}>
+        {value}
+      </pre>
     </div>
   );
 }

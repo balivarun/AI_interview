@@ -190,7 +190,6 @@ public class InterviewService {
         return new AnswerResponse(true, completed, interview.getCurrentQuestionNumber(), evaluationPending);
     }
 
-    @Transactional
     public CodeSubmissionResponse submitCode(String clerkId, UUID interviewId, CodeSubmissionRequest request) {
         Interview interview = ownedInterview(clerkId, interviewId);
         if (interview.getStatus() != InterviewStatus.IN_PROGRESS) {
@@ -205,7 +204,8 @@ public class InterviewService {
         submission.setCode(request.code());
         codeSubmissionRepository.save(submission);
         CodeExecutionResult result = codeExecutionService.execute(request.language(), request.code());
-        return new CodeSubmissionResponse(true, result.passed(), result.total(), result.status());
+        return new CodeSubmissionResponse(true, result.succeeded(), result.status(), result.output(),
+            result.errorOutput(), result.compileOutput(), result.compileError());
     }
 
     @Transactional(readOnly = true)
@@ -245,7 +245,31 @@ public class InterviewService {
             average(evaluations.stream().map(Evaluation::getCommunication).toList()),
             average(evaluations.stream().map(Evaluation::getCodeQuality).toList()),
             average(evaluations.stream().map(Evaluation::getComplexityAnalysis).toList()),
-                strengths, weaknesses, recommendations, pending);
+                strengths, weaknesses, recommendations, pending, evaluations.size(), answers.size());
+    }
+
+    public InterviewReportResponse retryPendingEvaluations(String clerkId, UUID interviewId) {
+        Interview interview = ownedInterview(clerkId, interviewId);
+        if (interview.getStatus() != InterviewStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Interview is not complete yet");
+        }
+
+        List<Answer> answers = answerRepository.findAllByInterviewIdWithQuestion(interviewId);
+        for (Answer answer : answers) {
+            if (evaluationRepository.existsByAnswerId(answer.getId())) continue;
+            AiEvaluationResponse result = evaluateAnswer(interview, answer.getQuestion(), answer);
+            if (result == null) continue;
+            evaluationRepository.save(toEvaluation(answer, result));
+            answer.setOverallScore(result.overallScore());
+            answerRepository.save(answer);
+        }
+
+        List<Evaluation> evaluations = evaluationRepository.findAllForInterview(interviewId);
+        if (!answers.isEmpty() && evaluations.size() == answers.size()) {
+            interview.setOverallScore(average(evaluations.stream().map(Evaluation::getOverallScore).toList()));
+            interviewRepository.save(interview);
+        }
+        return report(clerkId, interviewId);
     }
 
         private AiQuestionResponse generateQuestion(Interview interview, int questionNumber,
