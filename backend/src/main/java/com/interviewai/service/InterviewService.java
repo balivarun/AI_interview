@@ -3,12 +3,19 @@ package com.interviewai.service;
 import com.interviewai.dto.request.AnswerRequest;
 import com.interviewai.dto.request.InterviewRequest;
 import com.interviewai.dto.request.CodeSubmissionRequest;
+import com.interviewai.client.AiEvaluationRequest;
+import com.interviewai.client.AiEvaluationResponse;
+import com.interviewai.client.AiQuestionRequest;
+import com.interviewai.client.AiQuestionResponse;
+import com.interviewai.client.AiServiceClient;
+import com.interviewai.client.AiServiceException;
 import com.interviewai.dto.response.AnswerResponse;
 import com.interviewai.dto.response.CodeSubmissionResponse;
 import com.interviewai.dto.response.InterviewResponse;
 import com.interviewai.dto.response.InterviewReportResponse;
 import com.interviewai.entity.Answer;
 import com.interviewai.entity.AppUser;
+import com.interviewai.entity.Evaluation;
 import com.interviewai.entity.Difficulty;
 import com.interviewai.entity.CodeSubmission;
 import com.interviewai.entity.Interview;
@@ -18,6 +25,7 @@ import com.interviewai.entity.Question;
 import com.interviewai.entity.QuestionType;
 import com.interviewai.repository.AnswerRepository;
 import com.interviewai.repository.CodeSubmissionRepository;
+import com.interviewai.repository.EvaluationRepository;
 import com.interviewai.repository.InterviewRepository;
 import com.interviewai.repository.QuestionRepository;
 import com.interviewai.repository.UserRepository;
@@ -26,6 +34,9 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
+import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -35,6 +46,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class InterviewService {
+    private static final Logger logger = LoggerFactory.getLogger(InterviewService.class);
     private static final List<QuestionDraft> QUESTION_BANK = List.of(
             new QuestionDraft("What is the difference between ArrayList and LinkedList?", "Java Collections", QuestionType.TECHNICAL),
             new QuestionDraft("Explain how HashMap handles collisions and resizes its internal table.", "HashMap", QuestionType.TECHNICAL),
@@ -53,16 +65,21 @@ public class InterviewService {
     private final UserRepository userRepository;
     private final CodeSubmissionRepository codeSubmissionRepository;
     private final CodeExecutionService codeExecutionService;
+    private final EvaluationRepository evaluationRepository;
+    private final AiServiceClient aiServiceClient;
 
     public InterviewService(InterviewRepository interviewRepository, QuestionRepository questionRepository,
             AnswerRepository answerRepository, UserRepository userRepository,
-            CodeSubmissionRepository codeSubmissionRepository, CodeExecutionService codeExecutionService) {
+            CodeSubmissionRepository codeSubmissionRepository, CodeExecutionService codeExecutionService,
+            EvaluationRepository evaluationRepository, AiServiceClient aiServiceClient) {
         this.interviewRepository = interviewRepository;
         this.questionRepository = questionRepository;
         this.answerRepository = answerRepository;
         this.userRepository = userRepository;
         this.codeSubmissionRepository = codeSubmissionRepository;
         this.codeExecutionService = codeExecutionService;
+        this.evaluationRepository = evaluationRepository;
+        this.aiServiceClient = aiServiceClient;
     }
 
     @Transactional
@@ -80,28 +97,18 @@ public class InterviewService {
         return InterviewMapper.toResponse(interviewRepository.save(interview), List.of());
     }
 
-    @Transactional
     public InterviewResponse start(String clerkId, UUID id) {
         Interview interview = ownedInterview(clerkId, id);
         if (interview.getStatus() == InterviewStatus.COMPLETED || interview.getStatus() == InterviewStatus.ABANDONED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Interview cannot be started in its current state");
         }
         if (interview.getStatus() == InterviewStatus.CREATED) {
+            AiQuestionResponse generated = generateQuestion(interview, 1, List.of(), List.of());
+            questionRepository.save(toQuestion(interview, 1, generated));
             interview.setStatus(InterviewStatus.IN_PROGRESS);
             interview.setStartedAt(Instant.now());
-            for (int index = 0; index < interview.getTotalQuestions(); index++) {
-                QuestionDraft draft = QUESTION_BANK.get(index % QUESTION_BANK.size());
-                Question question = new Question();
-                question.setInterview(interview);
-                question.setQuestionText(draft.text());
-                question.setTopic(draft.topic());
-                question.setDifficulty(interview.getDifficulty());
-                question.setQuestionType(interview.getInterviewType() == com.interviewai.entity.InterviewType.DSA
-                        ? QuestionType.DSA : draft.type());
-                question.setQuestionNumber(index + 1);
-                question.setExpectedConcepts("");
-                questionRepository.save(question);
-            }
+            interview.setCurrentQuestionNumber(1);
+            interviewRepository.save(interview);
         }
         return InterviewMapper.toResponse(interview, questionRepository.findAllByInterviewIdOrderByQuestionNumber(id));
     }
@@ -122,7 +129,6 @@ public class InterviewService {
         return interviews.map(interview -> InterviewMapper.toResponse(interview, List.of()));
     }
 
-    @Transactional
     public AnswerResponse submitAnswer(String clerkId, UUID interviewId, AnswerRequest request) {
         Interview interview = ownedInterview(clerkId, interviewId);
         if (interview.getStatus() != InterviewStatus.IN_PROGRESS) {
@@ -141,16 +147,47 @@ public class InterviewService {
         answer.setInterview(interview);
         answer.setAnswerText(request.answerText().trim());
         answer.setDurationSeconds(request.durationSeconds());
-        answerRepository.save(answer);
+        answer = answerRepository.save(answer);
+
+        AiEvaluationResponse aiEvaluation = evaluateAnswer(interview, question, answer);
+        boolean evaluationPending = aiEvaluation == null;
+        if (aiEvaluation != null) {
+            evaluationRepository.save(toEvaluation(answer, aiEvaluation));
+            answer.setOverallScore(aiEvaluation.overallScore());
+            answerRepository.save(answer);
+        }
 
         boolean completed = question.getQuestionNumber() >= interview.getTotalQuestions();
         if (completed) {
             interview.setStatus(InterviewStatus.COMPLETED);
             interview.setCompletedAt(Instant.now());
+            if (aiEvaluation != null) interview.setOverallScore(aiEvaluation.overallScore());
         } else {
-            interview.setCurrentQuestionNumber(interview.getCurrentQuestionNumber() + 1);
+            int nextQuestionNumber = question.getQuestionNumber() + 1;
+            List<Question> previous = questionRepository.findAllByInterviewIdOrderByQuestionNumber(interviewId);
+            Question nextQuestion;
+            if (aiEvaluation != null && aiEvaluation.overallScore() < 5
+                    && aiEvaluation.followUpQuestion() != null && !aiEvaluation.followUpQuestion().isBlank()) {
+                nextQuestion = new Question();
+                nextQuestion.setInterview(interview);
+                nextQuestion.setQuestionText(aiEvaluation.followUpQuestion());
+                nextQuestion.setTopic(aiEvaluation.recommendedTopic());
+                nextQuestion.setDifficulty(interview.getDifficulty());
+                nextQuestion.setQuestionType(QuestionType.FOLLOW_UP);
+                nextQuestion.setQuestionNumber(nextQuestionNumber);
+                nextQuestion.setExpectedConcepts("");
+            } else {
+                List<String> weakTopics = aiEvaluation != null && aiEvaluation.overallScore() < 7
+                        ? List.of(aiEvaluation.recommendedTopic()) : List.of();
+                AiQuestionResponse generated = generateQuestion(interview, nextQuestionNumber,
+                        previous.stream().map(Question::getQuestionText).toList(), weakTopics);
+                nextQuestion = toQuestion(interview, nextQuestionNumber, generated);
+            }
+            questionRepository.save(nextQuestion);
+            interview.setCurrentQuestionNumber(nextQuestionNumber);
         }
-        return new AnswerResponse(true, completed, interview.getCurrentQuestionNumber());
+        interviewRepository.save(interview);
+        return new AnswerResponse(true, completed, interview.getCurrentQuestionNumber(), evaluationPending);
     }
 
     @Transactional
@@ -178,20 +215,110 @@ public class InterviewService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Interview is not complete yet");
         }
         List<Answer> answers = answerRepository.findAllByInterviewId(id);
-        List<Double> evaluatedScores = answers.stream().map(Answer::getOverallScore).filter(java.util.Objects::nonNull).toList();
-        boolean pending = evaluatedScores.isEmpty();
-        double score = pending ? 0 : evaluatedScores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        List<Evaluation> evaluations = evaluationRepository.findAllForInterview(id);
+        boolean pending = evaluations.size() < answers.size();
+        double score = average(evaluations.stream().map(Evaluation::getOverallScore).toList());
         String completedAt = DateTimeFormatter.ofPattern("MMMM d, uuuu")
                 .withZone(ZoneOffset.UTC).format(interview.getCompletedAt());
-        List<String> strengths = pending ? List.of("Answers saved; AI evaluation is pending.") : List.of();
-        List<String> weaknesses = pending ? List.of("Evaluation becomes available when the AI service is configured.") : List.of();
-        List<InterviewReportResponse.RecommendedTopic> recommendations = List.of(
-                new InterviewReportResponse.RecommendedTopic("Java Collections", interview.getDifficulty().name(), "Practice"),
-                new InterviewReportResponse.RecommendedTopic("Problem Solving", interview.getDifficulty().name(), "Practice"));
+        List<String> strengths = evaluations.stream().flatMap(evaluation -> evaluation.getStrengths().stream())
+            .distinct().limit(8).toList();
+        List<String> weaknesses = evaluations.stream()
+            .flatMap(evaluation -> java.util.stream.Stream.concat(
+                evaluation.getWeaknesses().stream(), evaluation.getMissingConcepts().stream()))
+            .distinct().limit(8).toList();
+        if (evaluations.isEmpty()) {
+            strengths = List.of("Answers saved; AI evaluation is pending.");
+            weaknesses = List.of("Evaluation becomes available when the AI service is configured.");
+        }
+        List<InterviewReportResponse.RecommendedTopic> recommendations = evaluations.stream()
+            .map(Evaluation::getRecommendedTopic).filter(Objects::nonNull).distinct().limit(5)
+            .map(topic -> new InterviewReportResponse.RecommendedTopic(topic, interview.getDifficulty().name(), "Practice"))
+            .toList();
+        if (recommendations.isEmpty()) {
+            recommendations = List.of(new InterviewReportResponse.RecommendedTopic(
+                "Core interview topics", interview.getDifficulty().name(), "Practice"));
+        }
         return new InterviewReportResponse(interview.getId(), interview.getRole().name(),
-                interview.getDurationMinutes() + " min", completedAt, score, score, score, score, score, score,
+            interview.getDurationMinutes() + " min", completedAt, score,
+            average(evaluations.stream().map(Evaluation::getTechnicalCorrectness).toList()),
+            average(evaluations.stream().map(Evaluation::getProblemSolving).toList()),
+            average(evaluations.stream().map(Evaluation::getCommunication).toList()),
+            average(evaluations.stream().map(Evaluation::getCodeQuality).toList()),
+            average(evaluations.stream().map(Evaluation::getComplexityAnalysis).toList()),
                 strengths, weaknesses, recommendations, pending);
     }
+
+        private AiQuestionResponse generateQuestion(Interview interview, int questionNumber,
+            List<String> previousQuestions, List<String> weakTopics) {
+        String requestedTopic = weakTopics.stream().findFirst().orElseGet(() -> topicFor(interview, questionNumber));
+        AiQuestionRequest request = new AiQuestionRequest(interview.getRole().name(), interview.getExperience().name(),
+            interview.getDifficulty().name(), requestedTopic, previousQuestions, weakTopics, questionNumber);
+        try {
+            return aiServiceClient.generateQuestion(request);
+        } catch (AiServiceException exception) {
+            logger.warn("AI question generation unavailable for interview {} question {}", interview.getId(), questionNumber);
+            QuestionDraft fallback = QUESTION_BANK.get((questionNumber - 1) % QUESTION_BANK.size());
+            return new AiQuestionResponse(fallback.text(), fallback.topic(), interview.getDifficulty().name(),
+                fallback.type().name(), List.of());
+        }
+        }
+
+        private AiEvaluationResponse evaluateAnswer(Interview interview, Question question, Answer answer) {
+        try {
+            return aiServiceClient.evaluateAnswer(new AiEvaluationRequest(question.getQuestionText(), answer.getAnswerText(),
+                interview.getRole().name(), question.getTopic(), question.getDifficulty().name(),
+                question.getQuestionType().name()));
+        } catch (AiServiceException exception) {
+            logger.warn("AI evaluation unavailable for interview {} question {}", interview.getId(), question.getQuestionNumber());
+            return null;
+        }
+        }
+
+        private Question toQuestion(Interview interview, int questionNumber, AiQuestionResponse generated) {
+        Question question = new Question();
+        question.setInterview(interview);
+        question.setQuestionText(generated.question());
+        question.setTopic(generated.topic());
+        question.setDifficulty(Difficulty.valueOf(generated.difficulty()));
+        question.setQuestionType(QuestionType.valueOf(generated.questionType()));
+        question.setQuestionNumber(questionNumber);
+        question.setExpectedConcepts(String.join(",", generated.expectedConcepts()));
+        return question;
+        }
+
+        private Evaluation toEvaluation(Answer answer, AiEvaluationResponse result) {
+        Evaluation evaluation = new Evaluation();
+        evaluation.setAnswer(answer);
+        evaluation.setTechnicalCorrectness(result.technicalCorrectness());
+        evaluation.setCommunication(result.communication());
+        evaluation.setProblemSolving(result.problemSolving());
+        evaluation.setCompleteness(result.completeness());
+        evaluation.setCodeQuality(result.codeQuality());
+        evaluation.setComplexityAnalysis(result.complexityAnalysis());
+        evaluation.setOverallScore(result.overallScore());
+        evaluation.setStrengths(result.strengths());
+        evaluation.setWeaknesses(result.weaknesses());
+        evaluation.setMissingConcepts(result.missingConcepts());
+        evaluation.setFeedback(result.feedback());
+        evaluation.setFollowUpQuestion(result.followUpQuestion());
+        evaluation.setRecommendedTopic(result.recommendedTopic());
+        return evaluation;
+        }
+
+        private String topicFor(Interview interview, int questionNumber) {
+        return switch (interview.getRole()) {
+            case JAVA_DEVELOPER -> List.of("Java Collections", "OOP", "Multithreading", "JVM")
+                .get((questionNumber - 1) % 4);
+            case SDE -> List.of("Arrays", "HashMap", "Trees", "Dynamic Programming")
+                .get((questionNumber - 1) % 4);
+            case FULL_STACK_DEVELOPER -> List.of("REST APIs", "System Design", "JavaScript", "Databases")
+                .get((questionNumber - 1) % 4);
+        };
+        }
+
+        private double average(List<Double> scores) {
+        return scores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        }
 
     public Interview ownedInterview(String clerkId, UUID id) {
         AppUser user = userRepository.findByClerkId(clerkId)

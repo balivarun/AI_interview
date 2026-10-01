@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Show, UserButton } from "@clerk/nextjs";
 import { ArrowRight, BrainCircuit, Code2, Gauge, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,12 +37,14 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/sign-in">
-              <Button variant="ghost">Login</Button>
-            </Link>
-            <Link href="/sign-up">
-              <Button>Start Interview</Button>
-            </Link>
+            <Show when="signed-out">
+              <Link href="/sign-in"><Button variant="ghost">Login</Button></Link>
+              <Link href="/sign-up"><Button>Start Interview</Button></Link>
+            </Show>
+            <Show when="signed-in">
+              <Link href="/dashboard"><Button variant="ghost">Dashboard</Button></Link>
+              <UserButton />
+            </Show>
           </div>
         </header>
 
@@ -57,14 +60,21 @@ export default function Home() {
               Simulate real interview loops for Java, SDE, and full stack roles — with follow-up questions, coding tasks, and scorecards.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
-              <Link href="/sign-in">
-                <Button size="lg" className="gap-2">
-                  Start Interview <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Link href="/dashboard">
-                <Button variant="outline" size="lg">View Demo</Button>
-              </Link>
+              <Show when="signed-out">
+                <Link href="/sign-in">
+                  <Button size="lg" className="gap-2">
+                    Start Interview <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+                <Link href="/sign-up"><Button variant="outline" size="lg">Create Account</Button></Link>
+              </Show>
+              <Show when="signed-in">
+                <Link href="/interviews/new">
+                  <Button size="lg" className="gap-2">
+                    Start Interview <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </Show>
             </div>
           </div>
 
@@ -147,9 +157,16 @@ export default function Home() {
         <section className="py-14">
           <div className="rounded-3xl border border-indigo-500/30 bg-gradient-to-r from-indigo-500/10 via-violet-500/10 to-slate-900 p-8 text-center">
             <h2 className="text-3xl font-semibold text-slate-50">Ready for your next interview?</h2>
-            <Link href="/sign-up" className="mt-6 inline-block">
-              <Button size="lg">Start Practicing</Button>
-            </Link>
+            <Show when="signed-out">
+              <Link href="/sign-up" className="mt-6 inline-block">
+                <Button size="lg">Start Practicing</Button>
+              </Link>
+            </Show>
+            <Show when="signed-in">
+              <Link href="/interviews/new" className="mt-6 inline-block">
+                <Button size="lg">Start Practicing</Button>
+              </Link>
+            </Show>
           </div>
         </section>
       </div>

@@ -62,6 +62,7 @@ export default function InterviewScreenPage() {
         router.push(`/interviews/${data.id}/report`);
         return;
       }
+      setSubmissionMessage(result.evaluationPending ? "Answer saved. AI evaluation is pending." : "Answer evaluated.");
       setAnswer("");
       await refetch();
     } catch (error) {
@@ -154,7 +155,7 @@ export default function InterviewScreenPage() {
               {submissionMessage && <p role="alert" className="text-sm text-red-400">{submissionMessage}</p>}
               <div className="flex justify-end">
                 <Button onClick={handleNext} disabled={isSubmitting || !answer.trim()}>
-                  {currentQuestionIndex === data.questions.length - 1 ? "Submit Interview" : "Submit Answer"}
+                  {data.currentQuestion >= data.totalQuestions ? "Submit Interview" : "Submit Answer"}
                 </Button>
               </div>
             </CardContent>

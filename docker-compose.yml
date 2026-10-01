@@ -20,7 +20,8 @@ services:
       context: ./ai-service
     environment:
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-interviewai}:${POSTGRES_PASSWORD:-interviewai}@postgres:5432/${POSTGRES_DB:-interviewai}
       SPRING_BACKEND_URL: http://backend:8080
     ports:

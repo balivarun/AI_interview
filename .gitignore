@@ -39,6 +39,8 @@ yarn-error.log*
 /frontend/.agents/
 /frontend/.claude/
 /frontend/skills-lock.json
+/backend/.gradle/
+/backend/build/
 /__pycache__/
 **/__pycache__/
 *.py[cod]

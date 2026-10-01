@@ -77,7 +77,8 @@ public class SecurityConfig {
             String prefix = key.startsWith("pk_test_") ? "pk_test_" : key.startsWith("pk_live_") ? "pk_live_" : null;
             if (prefix == null) return null;
             String encodedDomain = key.substring(prefix.length()).replaceAll("\\$+$", "");
-            String domain = new String(Base64.getUrlDecoder().decode(encodedDomain), StandardCharsets.UTF_8);
+                String domain = new String(Base64.getUrlDecoder().decode(encodedDomain), StandardCharsets.UTF_8)
+                    .replaceAll("\\$+$", "");
             return domain.startsWith("http://") || domain.startsWith("https://") ? domain : "https://" + domain;
         } catch (IllegalArgumentException exception) {
             return null;

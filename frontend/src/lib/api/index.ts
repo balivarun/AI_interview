@@ -223,7 +223,7 @@ export async function createInterview(data: InterviewConfig): Promise<Interview>
 export async function submitAnswer(
   data: AnswerPayload,
   durationSeconds = 0,
-): Promise<{ ok: true; completed: boolean; currentQuestion: number }> {
+): Promise<{ ok: true; completed: boolean; currentQuestion: number; evaluationPending: boolean }> {
   return request(`/interviews/${data.interviewId}/answers`, {
     method: "POST",
     body: JSON.stringify({ questionId: data.questionId, answerText: data.answer, durationSeconds }),
